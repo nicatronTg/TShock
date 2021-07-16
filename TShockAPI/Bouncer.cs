@@ -36,13 +36,14 @@ namespace TShockAPI
 	/// <summary>Bouncer is the TShock anti-hack and anti-cheat system.</summary>
 	internal sealed class Bouncer
 	{
-		internal Handlers.SendTileRectHandler STSHandler { get; set; }
-		internal Handlers.NetModules.NetModulePacketHandler NetModuleHandler { get; set; }
-		internal Handlers.EmojiHandler EmojiHandler { get; set; }
-		internal Handlers.DisplayDollItemSyncHandler DisplayDollItemSyncHandler { get; set; }
-		internal Handlers.RequestTileEntityInteractionHandler RequestTileEntityInteractionHandler { get; set; }
-		internal Handlers.LandGolfBallInCupHandler LandGolfBallInCupHandler { get; set; }
-		internal Handlers.SyncTilePickingHandler SyncTilePickingHandler { get; set; }
+		internal Handlers.SendTileRectHandler STSHandler { get; private set; }
+		internal Handlers.NetModules.NetModulePacketHandler NetModuleHandler { get; private set; }
+		internal Handlers.EmojiHandler EmojiHandler { get; private set; }
+		internal Handlers.IllegalPerSe.EmojiPlayerMismatch EmojiPlayerMismatch { get; private set; }
+		internal Handlers.DisplayDollItemSyncHandler DisplayDollItemSyncHandler { get; private set; }
+		internal Handlers.RequestTileEntityInteractionHandler RequestTileEntityInteractionHandler { get; private set; }
+		internal Handlers.LandGolfBallInCupHandler LandGolfBallInCupHandler { get; private set; }
+		internal Handlers.SyncTilePickingHandler SyncTilePickingHandler { get; private set; }
 
 		/// <summary>Constructor call initializes Bouncer and related functionality.</summary>
 		/// <returns>A new Bouncer.</returns>
@@ -53,6 +54,9 @@ namespace TShockAPI
 
 			NetModuleHandler = new Handlers.NetModules.NetModulePacketHandler();
 			GetDataHandlers.ReadNetModule += NetModuleHandler.OnReceive;
+
+			EmojiPlayerMismatch = new Handlers.IllegalPerSe.EmojiPlayerMismatch();
+			GetDataHandlers.Emoji += EmojiPlayerMismatch.OnReceive;
 
 			EmojiHandler = new Handlers.EmojiHandler();
 			GetDataHandlers.Emoji += EmojiHandler.OnReceive;
@@ -304,10 +308,11 @@ namespace TShockAPI
 						return;
 					}
 
-					if (selectedItem.placeStyle != style)
+					if ((args.Player.TPlayer.BiomeTorchHoldStyle(style) != args.Player.TPlayer.BiomeTorchPlaceStyle(style))
+					&& (selectedItem.placeStyle != style))
 					{
-						TShock.Log.ConsoleError(string.Format("Bouncer / OnTileEdit rejected from (placestyle) {0} {1} {2} placeStyle: {3} expectedStyle: {4}",
-							args.Player.Name, action, editData, style, selectedItem.placeStyle));
+						TShock.Log.ConsoleError("Bouncer / OnTileEdit rejected from (placestyle) {0} {1} {2} placeStyle: {3} expectedStyle: {4}",
+							args.Player.Name, action, editData, style, selectedItem.placeStyle);
 						args.Player.SendTileSquare(tileX, tileY, 1);
 						args.Handled = true;
 						return;
@@ -1537,7 +1542,7 @@ namespace TShockAPI
 				if (npc.townNPC && npc.netID != NPCID.Guide && npc.netID != NPCID.Clothier)
 				{
 					if (type != BuffID.Lovestruck && type != BuffID.Stinky && type != BuffID.DryadsWard &&
-						type != BuffID.Wet && type != BuffID.Slimed && type != BuffID.GelBalloonBuff)
+						type != BuffID.Wet && type != BuffID.Slimed && type != BuffID.GelBalloonBuff && type != BuffID.Frostburn2)
 					{
 						detectedNPCBuffTimeCheat = true;
 					}
@@ -1550,8 +1555,8 @@ namespace TShockAPI
 
 			if (detectedNPCBuffTimeCheat)
 			{
-				TShock.Log.ConsoleDebug("Bouncer / OnNPCAddBuff rejected abnormal buff ({1}) from {0}", args.Player.Name, type);
-				args.Player.Kick($"Added buff to NPC abnormally.", true);
+				TShock.Log.ConsoleDebug("Bouncer / OnNPCAddBuff rejected abnormal buff ({0}) added to {1} ({2}) from {3}.", type, npc.TypeName, npc.netID, args.Player.Name);
+				args.Player.Kick($"Added buff to {npc.TypeName} NPC abnormally.", true);
 				args.Handled = true;
 			}
 		}

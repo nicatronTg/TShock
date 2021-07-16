@@ -75,36 +75,52 @@ namespace TShockAPI
 		public static readonly TSPlayer All = new TSPlayer("All");
 
 		/// <summary>
-		/// Finds a TSPlayer based on name or ID
+		/// Finds a TSPlayer based on name or ID.
+		/// If the string comes with tsi: or tsn:, we'll only return a list with one element,
+		/// either the player with the matching ID or name, respectively.
 		/// </summary>
 		/// <param name="plr">Player name or ID</param>
 		/// <returns>A list of matching players</returns>
-		public static List<TSPlayer> FindByNameOrID(string plr)
+		public static List<TSPlayer> FindByNameOrID(string search)
 		{
 			var found = new List<TSPlayer>();
+
+			search = search.Trim();
+
+			// tsi: and tsn: are used to disambiguate between usernames and not
+			// and are also both 3 characters to remove them from the search
+			// (the goal was to pick prefixes unlikely to be used by names)
+			// (and not to collide with other prefixes used by other commands)
+			var exactIndexOnly = search.StartsWith("tsi:");
+			var exactNameOnly = search.StartsWith("tsn:");
+
+			if (exactNameOnly || exactIndexOnly)
+				search = search.Remove(0, 4);
+
 			// Avoid errors caused by null search
-			if (plr == null)
+			if (search == null || search == "")
 				return found;
 
-			byte plrID;
-			if (byte.TryParse(plr, out plrID) && plrID < Main.maxPlayers)
+			byte searchID;
+			if (byte.TryParse(search, out searchID) && searchID < Main.maxPlayers)
 			{
-				TSPlayer player = TShock.Players[plrID];
+				TSPlayer player = TShock.Players[searchID];
 				if (player != null && player.Active)
 				{
-					return new List<TSPlayer> { player };
+					if (exactIndexOnly)
+						return new List<TSPlayer> { player };
+					found.Add(player);
 				}
 			}
 
-			string plrLower = plr.ToLower();
+			string searchLower = search.ToLower();
 			foreach (TSPlayer player in TShock.Players)
 			{
 				if (player != null)
 				{
-					// Must be an EXACT match
-					if (player.Name == plr)
+					if ((search == player.Name) && exactNameOnly)
 						return new List<TSPlayer> { player };
-					if (player.Name.ToLower().StartsWith(plrLower))
+					if (player.Name.ToLower().StartsWith(searchLower))
 						found.Add(player);
 				}
 			}
@@ -671,19 +687,21 @@ namespace TShockAPI
 			}
 
 			// If they should be warned, warn them.
-			switch (failure)
+			if (!TShock.Config.Settings.SuppressPermissionFailureNotices)
 			{
-				case BuildPermissionFailPoint.GeneralBuild:
-					SendErrorMessage("You do not have permission to build on this server.");
-					break;
-				case BuildPermissionFailPoint.SpawnProtect:
-					SendErrorMessage("You do not have permission to build in the spawn point.");
-					break;
-				case BuildPermissionFailPoint.Regions:
-					SendErrorMessage("You do not have permission to build in this region.");
-					break;
+				switch (failure)
+				{
+					case BuildPermissionFailPoint.GeneralBuild:
+						SendErrorMessage("You do not have permission to build on this server.");
+						break;
+					case BuildPermissionFailPoint.SpawnProtect:
+						SendErrorMessage("You do not have permission to build in the spawn point.");
+						break;
+					case BuildPermissionFailPoint.Regions:
+						SendErrorMessage("You do not have permission to build in this region.");
+						break;
+				}
 			}
-
 			// Set the last warning time to now.
 			lastPermissionWarning = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
 
@@ -1363,7 +1381,7 @@ namespace TShockAPI
 		/// <param name="msg">The message.</param>
 		public virtual void SendSuccessMessage(string msg)
 		{
-			SendMessage(msg, Color.Green);
+			SendMessage(msg, Color.LimeGreen);
 		}
 
 		/// <summary>
@@ -1508,8 +1526,10 @@ namespace TShockAPI
 					}
 
 					foo = foo.Replace("%map%", (TShock.Config.Settings.UseServerName ? TShock.Config.Settings.ServerName : Main.worldName));
-					foo = foo.Replace("%players%", String.Join(",", players));
+					foo = foo.Replace("%players%", String.Join(", ", players));
 					foo = foo.Replace("%specifier%", TShock.Config.Settings.CommandSpecifier);
+					foo = foo.Replace("%onlineplayers%", TShock.Utils.GetActivePlayerCount().ToString());
+					foo = foo.Replace("%serverslots%", TShock.Config.Settings.MaxSlots.ToString());
 
 					SendMessage(foo, lineColor);
 				}
@@ -1667,12 +1687,13 @@ namespace TShockAPI
 		/// <param name="matches">An enumerable list with the matches</param>
 		public void SendMultipleMatchError(IEnumerable<object> matches)
 		{
-			SendErrorMessage("More than one match found: ");
+			SendErrorMessage("More than one match found -- unable to decide which is correct: ");
 
 			var lines = PaginationTools.BuildLinesFromTerms(matches.ToArray());
 			lines.ForEach(SendInfoMessage);
 
 			SendErrorMessage("Use \"my query\" for items with spaces.");
+			SendErrorMessage("Use tsi:[number] or tsn:[username] to distinguish between user IDs and usernames.");
 		}
 
 		[Conditional("DEBUG")]

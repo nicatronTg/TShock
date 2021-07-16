@@ -494,6 +494,50 @@ namespace TShockAPI
 		}
 
 		/// <summary>
+		/// DoorUseEventArgs - the arguments for a DoorUse event
+		/// </summary>
+		public class DoorUseEventArgs : GetDataHandledEventArgs
+		{
+			/// <summary>
+			/// X - The x position of the door being used
+			/// </summary>
+			public short X { get; set; }
+			/// <summary>
+			/// Y - The y position of the door being used
+			/// </summary>
+			public short Y { get; set; }
+			/// <summary>
+			/// Direction - Information about which way the door opens or where the player is relative to the door
+			/// </summary>
+			public byte Direction { get; set; }
+			/// <summary>
+			/// Action - The type of thing happening to the door
+			/// </summary>
+			public DoorAction Action { get; set; }
+		}
+
+		/// <summary>
+		/// DoorUse - called when a door is opened or closed (normal or trap)
+		/// </summary>
+		public static HandlerList<DoorUseEventArgs> DoorUse = new HandlerList<DoorUseEventArgs>();
+		private static bool OnDoorUse(TSPlayer ply, MemoryStream data, short x, short y, byte direction, DoorAction action)
+		{
+			if (DoorUse == null)
+				return false;
+
+			var args = new DoorUseEventArgs
+			{
+				Player = ply,
+				X = x,
+				Y = y,
+				Direction = direction,
+				Action = action
+			};
+			DoorUse.Invoke(null, args);
+			return args.Handled;
+		}
+
+		/// <summary>
 		/// For use in a SendTileRect event
 		/// </summary>
 		public class SendTileRectEventArgs : GetDataHandledEventArgs
@@ -2282,6 +2326,14 @@ namespace TShockAPI
 				args.Player.Kick("You have been Bounced.", true, true);
 				return true;
 			}
+
+			if (name.Trim().StartsWith("tsi:") || name.Trim().StartsWith("tsn:"))
+			{
+				TShock.Log.ConsoleDebug("GetDataHandlers / rejecting player for name prefix starting with tsi: or tsn:.");
+				args.Player.Kick("Illegal name: prefixes tsi: and tsn: are forbidden.", true, true);
+				return true;
+			}
+
 			if (args.Player.ReceivedInfo)
 			{
 				// Since Terraria 1.2.3 these character properties can change ingame.
@@ -2305,8 +2357,9 @@ namespace TShockAPI
 					args.Player.TPlayer.hideVisibleAccessory[i+8] = hideVisual2[i];
 				args.Player.TPlayer.hideMisc = hideMisc;
 				args.Player.TPlayer.extraAccessory = extraSlot;
-				args.Player.TPlayer.unlockedBiomeTorches = unlockedBiomeTorches;
 				args.Player.TPlayer.UsingBiomeTorches = usingBiomeTorches;
+				args.Player.TPlayer.happyFunTorchTime = happyFunTorchTime;
+				args.Player.TPlayer.unlockedBiomeTorches = unlockedBiomeTorches;
 
 				NetMessage.SendData((int)PacketTypes.PlayerInfo, -1, args.Player.Index, NetworkText.FromLiteral(args.Player.Name), args.Player.Index);
 				return true;
@@ -2609,10 +2662,17 @@ namespace TShockAPI
 
 		private static bool HandleDoorUse(GetDataHandlerArgs args)
 		{
-			byte type = (byte)args.Data.ReadByte();
+			byte action = (byte)args.Data.ReadByte();
 			short x = args.Data.ReadInt16();
 			short y = args.Data.ReadInt16();
-			args.Data.ReadByte(); //Ignore direction
+			byte direction = (byte)args.Data.ReadByte();
+
+			DoorAction doorAction = (DoorAction)action;
+
+			if (OnDoorUse(args.Player, args.Data, x, y, direction, doorAction))
+				return true;
+
+			ushort tileType = Main.tile[x, y].type;
 
 			if (x >= Main.maxTilesX || y >= Main.maxTilesY || x < 0 || y < 0) // Check for out of range
 			{
@@ -2620,13 +2680,12 @@ namespace TShockAPI
 				return true;
 			}
 
-			if (type < 0 || type > 5)
+			if (action < 0 || action > 5)
 			{
 				TShock.Log.ConsoleDebug("GetDataHandlers / HandleDoorUse rejected type 0 5 check {0}", args.Player.Name);
 				return true;
 			}
 
-			ushort tileType = Main.tile[x, y].type;
 
 			if (tileType != TileID.ClosedDoor && tileType != TileID.OpenDoor
 			                                  && tileType != TileID.TallGateClosed && tileType != TileID.TallGateOpen
@@ -2750,10 +2809,26 @@ namespace TShockAPI
 			{
 				args.Player.SendErrorMessage("You do not have permission to hurt Town NPCs.");
 				args.Player.SendData(PacketTypes.NpcUpdate, "", id);
-				TShock.Log.ConsoleDebug("GetDataHandlers / HandleNpcStrike rejected npc strike {0}", args.Player.Name);
+				TShock.Log.ConsoleDebug($"GetDataHandlers / HandleNpcStrike rejected npc strike {args.Player.Name}");
 				return true;
 			}
-
+			
+			if (Main.npc[id].netID == NPCID.EmpressButterfly)
+			{
+				if (!args.Player.HasPermission(Permissions.summonboss))
+				{
+					args.Player.SendErrorMessage("You do not have permission to summon the Empress of Light.");
+					args.Player.SendData(PacketTypes.NpcUpdate, "", id);
+					TShock.Log.ConsoleDebug($"GetDataHandlers / HandleNpcStrike rejected EoL summon from {args.Player.Name}");
+					return true;
+				}
+				else if (!TShock.Config.Settings.AnonymousBossInvasions)
+				{
+					TShock.Utils.Broadcast(string.Format($"{args.Player.Name} summoned the Empress of Light!"), 175, 75, 255);
+				}
+				else
+					TShock.Utils.SendLogs(string.Format($"{args.Player.Name} summoned the Empress of Light!"), Color.PaleVioletRed, args.Player);
+			}
 			return false;
 		}
 
@@ -3142,10 +3217,23 @@ namespace TShockAPI
 				return true;
 			}
 
-			if (type == 3 && !args.Player.HasPermission(Permissions.usesundial))
+			if (type == 3)
 			{
-				TShock.Log.ConsoleDebug("GetDataHandlers / HandleSpecial rejected enchanted sundial permission {0}", args.Player.Name);
-				args.Player.SendErrorMessage("You do not have permission to use the Enchanted Sundial.");
+				if (!args.Player.HasPermission(Permissions.usesundial))
+				{
+					TShock.Log.ConsoleDebug($"GetDataHandlers / HandleSpecial rejected enchanted sundial permission {args.Player.Name}");
+					args.Player.SendErrorMessage("You do not have permission to use the Enchanted Sundial.");
+				}
+				else if (TShock.Config.Settings.ForceTime != "normal")
+				{
+					TShock.Log.ConsoleDebug($"GetDataHandlers / HandleSpecial rejected enchanted sundial permission (ForceTime) {args.Player.Name}");
+					if (!args.Player.HasPermission(Permissions.cfgreload))
+					{
+						args.Player.SendErrorMessage("You cannot use the Enchanted Sundial because time is stopped.");
+					}
+					else
+						args.Player.SendErrorMessage("You must set ForceTime to normal via config to use the Enchanted Sundial.");
+				}
 				return true;
 			}
 
@@ -3984,6 +4072,16 @@ namespace TShockAPI
 			args.Player.Kick("Exploit attempt detected!");
 			TShock.Log.ConsoleDebug($"HandleSyncCavernMonsterType: Player is trying to modify NPC cavernMonsterType; this is a crafted packet! - From {args.Player.Name}");
 			return true;
+		}
+
+		public enum DoorAction
+		{
+			OpenDoor = 0,
+			CloseDoor,
+			OpenTrapdoor,
+			CloseTrapdoor,
+			OpenTallGate,
+			CloseTallGate
 		}
 
 		public enum EditAction

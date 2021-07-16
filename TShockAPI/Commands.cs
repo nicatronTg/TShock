@@ -541,7 +541,7 @@ namespace TShockAPI
 			{
 				HelpText = "Gives another player a buff or debuff for an amount of time. Putting -1 for time will set it to 415 days."
 			});
-			add(new Command(Permissions.godmode, ToggleGodMode, "godmode")
+			add(new Command(Permissions.godmode, ToggleGodMode, "godmode", "god")
 			{
 				HelpText = "Toggles godmode on a player."
 			});
@@ -549,7 +549,7 @@ namespace TShockAPI
 			{
 				HelpText = "Heals a player in HP and MP."
 			});
-			add(new Command(Permissions.kill, Kill, "kill")
+			add(new Command(Permissions.kill, Kill, "kill", "slay")
 			{
 				HelpText = "Kills another player."
 			});
@@ -1161,11 +1161,12 @@ namespace TShockAPI
 
 		private static void WorldInfo(CommandArgs args)
 		{
-			args.Player.SendInfoMessage("Information of the currently running world");
+			args.Player.SendInfoMessage("Information about the currently running world");
 			args.Player.SendInfoMessage("Name: " + (TShock.Config.Settings.UseServerName ? TShock.Config.Settings.ServerName : Main.worldName));
 			args.Player.SendInfoMessage("Size: {0}x{1}", Main.maxTilesX, Main.maxTilesY);
 			args.Player.SendInfoMessage("ID: " + Main.worldID);
 			args.Player.SendInfoMessage("Seed: " + WorldGen.currentWorldSeed);
+			args.Player.SendInfoMessage("Path: " + Main.worldPathName);
 		}
 
 		#endregion
@@ -2391,6 +2392,7 @@ namespace TShockAPI
 
 			Main.GameMode = mode;
 			args.Player.SendSuccessMessage("World mode set to {0}", _worldModes.Keys.ElementAt(mode));
+			TSPlayer.All.SendData(PacketTypes.WorldInfo);
 		}
 
 		private static void Hardmode(CommandArgs args)
@@ -2723,6 +2725,11 @@ namespace TShockAPI
 
 		private static void Home(CommandArgs args)
 		{
+			if (args.Player.Dead)
+			{
+				args.Player.SendErrorMessage("You are dead.");
+				return;
+			}
 			args.Player.Spawn(PlayerSpawnContext.RecallFromItem);
 			args.Player.SendSuccessMessage("Teleported to your spawnpoint.");
 		}
@@ -3131,7 +3138,7 @@ namespace TShockAPI
 				string warpName = args.Parameters[2];
 				var warp = TShock.Warps.Find(warpName);
 				var plr = foundplr[0];
-				if (warp.Position != Point.Zero)
+				if (warp != null)
 				{
 					if (plr.Teleport(warp.Position.X * 16, warp.Position.Y * 16))
 					{
@@ -3492,7 +3499,7 @@ namespace TShockAPI
 
 						try
 						{
-							string response = TShock.Groups.DeleteGroup(args.Parameters[1]);
+							string response = TShock.Groups.DeleteGroup(args.Parameters[1], true);
 							if (response.Length > 0)
 							{
 								args.Player.SendSuccessMessage(response);
@@ -3500,7 +3507,7 @@ namespace TShockAPI
 						}
 						catch (GroupManagerException ex)
 						{
-							args.Player.SendErrorMessage(ex.ToString());
+							args.Player.SendErrorMessage(ex.Message);
 						}
 					}
 					#endregion
@@ -3536,7 +3543,7 @@ namespace TShockAPI
 						}
 						catch (GroupManagerException ex)
 						{
-							args.Player.SendErrorMessage(ex.ToString());
+							args.Player.SendErrorMessage(ex.Message);
 						}
 					}
 					#endregion
@@ -6311,7 +6318,7 @@ namespace TShockAPI
 					}
 					Main.tile[x, y - 1].wall = 0;
 					WorldGen.TryGrowingTreeByType(584, x, y);
-					name = "Amethust Gemtree";
+					name = "Amethyst Gemtree";
 					break;
 
 				case "sapphire":
